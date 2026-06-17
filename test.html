@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rise Course Translate — CDN Test</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      color: #fff;
+      background: #1b1b1b;
+    }
+    /* Mock Rise cover page */
+    .cover {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 24px;
+      background: linear-gradient(135deg, #2d2d2d, #111);
+    }
+    .cover__header-content {
+      max-width: 560px;
+      text-align: center;
+    }
+    .cover__header-content h1 {
+      font-size: 2rem;
+      margin: 0 0 12px;
+    }
+    .cover__header-content p {
+      opacity: 0.85;
+      line-height: 1.6;
+      margin: 0 0 28px;
+    }
+    .cover__header-content-action-link {
+      display: inline-block;
+      background: #fff;
+      color: #111;
+      text-decoration: none;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 14px 36px;
+      border-radius: 999px;
+    }
+    .cover__header-content-action-link-text {
+      text-transform: uppercase;
+    }
+    .lesson-content {
+      display: none;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 40px 24px;
+      color: #222;
+      background: #fff;
+      min-height: 100vh;
+    }
+    .lesson-content.is-active { display: block; }
+    .note {
+      font-size: 13px;
+      color: #666;
+      margin-top: 32px;
+      padding-top: 16px;
+      border-top: 1px solid #ddd;
+    }
+  </style>
+  <script src="risecoursetranslate.js" defer></script>
+</head>
+<body>
+  <div id="app">
+    <section class="cover" id="cover-page">
+      <div class="cover__header-content">
+        <h1>Welcome to the Safety Training Course</h1>
+        <p>
+          Learn essential workplace safety practices before you begin the lessons.
+          Select a language below the Start button if you need translation.
+        </p>
+        <a href="#" class="cover__header-content-action-link" id="start-btn">
+          <span class="cover__header-content-action-link-text">Start</span>
+        </a>
+      </div>
+    </section>
+
+    <section class="lesson-content" id="lesson-content">
+      <h2>Lesson 1: Workplace Safety</h2>
+      <p>Always wear protective equipment when entering the construction zone.</p>
+      <p>Report any hazards to your supervisor immediately.</p>
+      <ul>
+        <li>Hard hat</li>
+        <li>Safety boots</li>
+        <li>High-visibility vest</li>
+      </ul>
+      <p class="note">
+        After clicking Start, the translate control moves to a small floating widget
+        at the bottom-right (same as a real Rise course).
+      </p>
+    </section>
+  </div>
+
+  <script>
+    document.getElementById('start-btn').addEventListener('click', function (e) {
+      e.preventDefault();
+      document.getElementById('cover-page').style.display = 'none';
+      document.getElementById('lesson-content').classList.add('is-active');
+    });
+  </script>
+</body>
+</html>

@@ -2,8 +2,15 @@
  * risecoursetranslate.js — Rise & Storyline Course Translator
  * Drop-in: add to index.html:
  *   <script src="https://cdn.jsdelivr.net/gh/Moyour/risecoursetranslate@1.0/risecoursetranslate.js" defer></script>
- * Uses Google Translate (free endpoint). No API key required.
- * v1.0
+ *
+ * Default: Google Translate (free, no API key).
+ * DeepL: requires your own proxy (DeepL blocks browser calls). Example:
+ *   <script
+ *     src="risecoursetranslate.js"
+ *     data-provider="deepl"
+ *     data-deepl-proxy="https://your-site.com/api/translate"
+ *     defer></script>
+ * v1.1
  */
 (function () {
   'use strict';
@@ -57,45 +64,99 @@
     { code: 'zu', label: '🇿🇦 Zulu' }
   ];
 
+  var DEEPL_LANG_MAP = {
+    ar: 'AR', bg: 'BG', cs: 'CS', da: 'DA', de: 'DE', el: 'EL', en: 'EN-GB',
+    es: 'ES', et: 'ET', fi: 'FI', fr: 'FR', hu: 'HU', id: 'ID', it: 'IT',
+    ja: 'JA', ko: 'KO', lt: 'LT', lv: 'LV', nl: 'NL', no: 'NB', pl: 'PL',
+    pt: 'PT-BR', ro: 'RO', ru: 'RU', sk: 'SK', sl: 'SL', sv: 'SV', th: 'TH',
+    tr: 'TR', uk: 'UK', vi: 'VI', zh: 'ZH', 'zh-TW': 'ZH-HANT'
+  };
+
   var STORAGE_KEY = 'rise_course_lang';
   var BAR_ID      = 'rise-translate-bar';
   var cache       = {};          // { langCode: { originalText: translatedText } }
   var originalMap = new Map();   // node → original text
 
+  /* Rise cover Start button selectors (published export) */
+  var START_SELECTORS = [
+    'a.cover__header-content-action-link',
+    '.cover__header-content-action-link',
+    'button.cover__header-content-action-link',
+    '[class*="cover"][class*="action-link"]'
+  ];
+
   /* ── BAR STYLES ────────────────────────────────────────────────── */
   var css = [
     '#' + BAR_ID + '{',
-    '  position:fixed;top:0;left:0;right:0;z-index:99999;',
-    '  display:flex;align-items:center;gap:10px;padding:8px 16px;',
-    '  background:#1a1a2e;color:#fff;font-family:sans-serif;font-size:13px;',
-    '  box-shadow:0 2px 8px rgba(0,0,0,0.35);',
+    '  display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px 10px;',
+    '  width:100%;box-sizing:border-box;margin-top:14px;padding:0;',
+    '  font-family:sans-serif;font-size:13px;color:inherit;',
     '}',
-    '#' + BAR_ID + ' label{opacity:.8;white-space:nowrap;user-select:none;}',
+    '#' + BAR_ID + '.rise-translate-bar--floating{',
+    '  position:fixed;bottom:16px;right:16px;left:auto;top:auto;z-index:99999;',
+    '  width:auto;max-width:calc(100vw - 32px);margin-top:0;padding:10px 14px;',
+    '  background:rgba(26,26,46,.92);color:#fff;border-radius:10px;',
+    '  box-shadow:0 4px 16px rgba(0,0,0,.25);',
+    '}',
+    '#' + BAR_ID + ' label{opacity:.85;white-space:nowrap;user-select:none;}',
     '#' + BAR_ID + ' select{',
-    '  background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);',
-    '  color:#fff;border-radius:5px;padding:5px 8px;font-size:13px;cursor:pointer;',
+    '  background:rgba(255,255,255,.92);border:1px solid rgba(0,0,0,.15);',
+    '  color:#222;border-radius:6px;padding:6px 8px;font-size:13px;cursor:pointer;',
     '  max-width:220px;',
     '}',
-    '#' + BAR_ID + ' select option{background:#1a1a2e;color:#fff;}',
-    '#' + BAR_ID + ' .rise-status{font-size:11px;opacity:.55;margin-left:auto;}',
-    '#' + BAR_ID + ' .rise-spinner{',
-    '  width:14px;height:14px;border:2px solid rgba(255,255,255,.3);',
-    '  border-top-color:#fff;border-radius:50%;',
-    '  animation:rise-spin .6s linear infinite;display:none;',
+    '#' + BAR_ID + '.rise-translate-bar--floating select{',
+    '  background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;',
     '}',
-    '@keyframes rise-spin{to{transform:rotate(360deg)}}',
-    'body.rise-has-bar{padding-top:42px !important;margin-top:0 !important;}'
+    '#' + BAR_ID + ' select option{background:#fff;color:#222;}',
+    '#' + BAR_ID + '.rise-translate-bar--floating select option{background:#1a1a2e;color:#fff;}',
+    '#' + BAR_ID + ' .rise-status{font-size:11px;opacity:.55;min-height:0;}',
+    '#' + BAR_ID + ' .rise-status:empty{display:none;}',
+    '#' + BAR_ID + '.rise-translate-bar--floating .rise-status{margin-left:4px;}',
+    '#' + BAR_ID + ' .rise-spinner{',
+    '  width:14px;height:14px;border:2px solid rgba(0,0,0,.15);',
+    '  border-top-color:#333;border-radius:50%;',
+    '  animation:rise-spin .6s linear infinite;display:none;flex-shrink:0;',
+    '}',
+    '#' + BAR_ID + '.rise-translate-bar--floating .rise-spinner{',
+    '  border-color:rgba(255,255,255,.3);border-top-color:#fff;',
+    '}',
+    '@keyframes rise-spin{to{transform:rotate(360deg)}}'
   ].join('\n');
 
   /* ── INIT ──────────────────────────────────────────────────────── */
+  function getConfig() {
+    var script = document.currentScript
+      || document.querySelector('script[src*="risecoursetranslate"]');
+    var provider = (script && script.getAttribute('data-provider')) || 'google';
+    return {
+      provider: provider === 'deepl' ? 'deepl' : 'google',
+      deeplProxyUrl: (script && script.getAttribute('data-deepl-proxy')) || ''
+    };
+  }
+
+  function mapToDeepLCode(code) {
+    return DEEPL_LANG_MAP[code] || null;
+  }
+
+  function getLanguages() {
+    var cfg = getConfig();
+    if (cfg.provider !== 'deepl') return LANGUAGES;
+    return LANGUAGES.filter(function (l) { return mapToDeepLCode(l.code); });
+  }
+
   function init() {
     injectStyles();
-    injectBar();
-    var saved = getSavedLang();
-    if (saved) {
-      document.getElementById('rise-select').value = saved;
-      translatePage(saved);
-    }
+    waitForCourseShell(function () {
+      placeBar();
+      var saved = getSavedLang();
+      if (saved) {
+        var sel = document.getElementById('rise-select');
+        if (sel) {
+          sel.value = saved;
+          translatePage(saved);
+        }
+      }
+    });
   }
 
   function injectStyles() {
@@ -104,8 +165,53 @@
     document.head.appendChild(s);
   }
 
-  function injectBar() {
-    var bar = document.createElement('div');
+  function isVisible(el) {
+    if (!el || !el.getBoundingClientRect) return false;
+    var rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function findStartButton() {
+    var i, el, candidates, txt, j;
+    for (i = 0; i < START_SELECTORS.length; i++) {
+      el = document.querySelector(START_SELECTORS[i]);
+      if (el && isVisible(el)) return el;
+    }
+    candidates = document.querySelectorAll('a, button');
+    for (j = 0; j < candidates.length; j++) {
+      txt = (candidates[j].textContent || '').trim().toLowerCase();
+      if (/^(start|begin|start course|resume|continue)$/.test(txt) && isVisible(candidates[j])) {
+        return candidates[j];
+      }
+    }
+    return null;
+  }
+
+  function waitForCourseShell(done) {
+    var finished = false;
+    var observer = null;
+    function finish() {
+      if (finished) return;
+      finished = true;
+      if (observer) observer.disconnect();
+      done();
+    }
+    if (findStartButton()) {
+      finish();
+      return;
+    }
+    observer = new MutationObserver(function () {
+      if (findStartButton()) finish();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    setTimeout(finish, 15000);
+  }
+
+  function ensureBar() {
+    var bar = document.getElementById(BAR_ID);
+    if (bar) return bar;
+
+    bar = document.createElement('div');
     bar.id = BAR_ID;
 
     var label = document.createElement('label');
@@ -118,7 +224,7 @@
 
     var defaultOpt = new Option('Select language…', '');
     sel.appendChild(defaultOpt);
-    LANGUAGES.forEach(function (l) {
+    getLanguages().forEach(function (l) {
       sel.appendChild(new Option(l.label, l.code));
     });
 
@@ -128,14 +234,15 @@
 
     var status = document.createElement('span');
     status.className = 'rise-status';
-    status.textContent = 'Powered by Google Translate';
+    status.textContent = '';
 
     sel.addEventListener('change', function () {
       var lang = this.value;
+      activeTranslation = lang || null;
       if (!lang) {
         restorePage();
         clearSavedLang();
-        status.textContent = 'Powered by Google Translate';
+        status.textContent = '';
         return;
       }
       saveLang(lang);
@@ -146,9 +253,21 @@
     bar.appendChild(sel);
     bar.appendChild(spinner);
     bar.appendChild(status);
+    return bar;
+  }
 
-    document.body.insertBefore(bar, document.body.firstChild);
-    document.body.classList.add('rise-has-bar');
+  function placeBar() {
+    var startBtn = findStartButton();
+    var bar = ensureBar();
+    if (startBtn) {
+      bar.classList.remove('rise-translate-bar--floating');
+      if (startBtn.nextElementSibling !== bar) {
+        startBtn.insertAdjacentElement('afterend', bar);
+      }
+      return;
+    }
+    bar.classList.add('rise-translate-bar--floating');
+    document.body.appendChild(bar);
   }
 
   /* ── TEXT NODE COLLECTION ──────────────────────────────────────── */
@@ -212,7 +331,7 @@
         return;
       }
       applyTranslations(nodes, lang);
-      if (status) status.textContent = 'Translated to ' + (langObj ? langObj.label : lang);
+      if (status) status.textContent = '';
     });
   }
 
@@ -230,15 +349,12 @@
     });
   }
 
-  /* ── GOOGLE TRANSLATE (free endpoint, batch) ───────────────────── */
-  /*
-   * We chunk into batches of 50 strings, joined by \n.
-   * Google's free endpoint supports ~5000 chars per request.
-   * If you prefer DeepL, swap this function — same signature.
-   */
+  /* ── TRANSLATION PROVIDERS ─────────────────────────────────────── */
   var CHUNK_SIZE = 50;
 
   function batchTranslate(texts, lang, done) {
+    var cfg = getConfig();
+    var translateFn = cfg.provider === 'deepl' ? deeplTranslate : googleTranslate;
     var chunks = chunkArray(texts, CHUNK_SIZE);
     var pending = chunks.length;
     var errored = null;
@@ -246,7 +362,7 @@
     if (pending === 0) return done(null);
 
     chunks.forEach(function (chunk) {
-      googleTranslate(chunk, lang, function (err, results) {
+      translateFn(chunk, lang, function (err, results) {
         if (errored) return;
         if (err) { errored = err; return done(err); }
         chunk.forEach(function (orig, i) {
@@ -283,6 +399,35 @@
         }
         var parts = raw.split('||||').map(function (s) { return s.replace(/^\n|\n$/g, ''); });
         cb(null, parts);
+      })
+      .catch(function (err) { cb(err, null); });
+  }
+
+  function deeplTranslate(texts, targetLang, cb) {
+    var cfg = getConfig();
+    var deeplCode = mapToDeepLCode(targetLang);
+
+    if (!cfg.deeplProxyUrl) {
+      return cb(new Error('DeepL proxy URL missing — set data-deepl-proxy on the script tag'));
+    }
+    if (!deeplCode) {
+      return cb(new Error('Language not supported by DeepL: ' + targetLang));
+    }
+
+    fetch(cfg.deeplProxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texts: texts, target_lang: deeplCode })
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        var results = (data.translations || []).map(function (item) {
+          return typeof item === 'string' ? item : item.text;
+        });
+        cb(null, results);
       })
       .catch(function (err) { cb(err, null); });
   }
@@ -326,28 +471,33 @@
   var activeTranslation = null;
 
   window.addEventListener('hashchange', function () {
+    placeBar();
     if (activeTranslation) setTimeout(function () { translatePage(activeTranslation); }, 400);
   });
 
-  var observer = new MutationObserver(function (mutations) {
+  var contentObserver = new MutationObserver(function (mutations) {
+    clearTimeout(contentObserver._placeT);
+    contentObserver._placeT = setTimeout(placeBar, 300);
+
     if (!activeTranslation) return;
     var relevant = mutations.some(function (m) {
       return m.addedNodes.length > 0 || m.type === 'characterData';
     });
     if (relevant) {
-      clearTimeout(observer._t);
-      observer._t = setTimeout(function () { translatePage(activeTranslation); }, 600);
+      clearTimeout(contentObserver._t);
+      contentObserver._t = setTimeout(function () { translatePage(activeTranslation); }, 600);
     }
   });
 
-  /* start observing after bar is injected */
   document.addEventListener('DOMContentLoaded', function () {
     var target = document.querySelector('#app, #root, .content-wrapper, body') || document.body;
-    observer.observe(target, { childList: true, subtree: true, characterData: false });
-
-    /* keep track of current lang for re-scan */
-    var sel = document.getElementById('rise-select');
-    if (sel) sel.addEventListener('change', function () { activeTranslation = this.value || null; });
+    contentObserver.observe(target, {
+      childList: true,
+      subtree: true,
+      characterData: false,
+      attributes: true,
+      attributeFilter: ['style', 'class', 'hidden']
+    });
   });
 
 })();
