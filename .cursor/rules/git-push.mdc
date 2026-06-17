@@ -1,0 +1,14 @@
+---
+description: Push completed work to GitHub on main branch
+alwaysApply: true
+---
+
+# Git workflow
+
+When finishing changes in this repo:
+
+1. Commit with a clear message describing why.
+2. Push to `origin main` — do not create new version tags unless the user asks.
+3. The canonical CDN link uses `@main`; pushing to main is enough for courses to get updates.
+
+Only skip push if the user explicitly says not to, or if there are no changes to commit.
