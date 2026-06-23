@@ -2,13 +2,14 @@
  * risecoursetranslate.js — Rise & Storyline Course Translator
  * Drop-in: add <script src="risecoursetranslate.js" defer></script> to index.html
  * Uses Google Translate (free endpoint). No API key required.
- * v1.6.5 — portal dropdown to body (Rise overflow), mousedown toggle, no global close
+ * v1.6.6 — fix pick/close: remove panel capture blockers, click toggle, reliable close
  */
 (function () {
   'use strict';
 
   if (window.__riseTranslateLoaded) return;
   window.__riseTranslateLoaded = true;
+  window.__riseTranslateVersion = '1.6.6';
 
   var LANGUAGES = [
     { code: 'af', label: 'Afrikaans' },
@@ -256,13 +257,10 @@
       opt.className = 'rt-option';
       opt.textContent = lang.label;
       opt.setAttribute('data-code', lang.code);
-      /* use mousedown so it fires before blur */
-      opt.addEventListener('mousedown', function (e) {
+      opt.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        e.stopImmediatePropagation();
         selectLanguage(lang.code, list);
-        closePanel(trigger, panel);
       });
       list.appendChild(opt);
     });
@@ -274,32 +272,47 @@
       });
     });
 
-    function stopRiseBubble(e) {
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-    }
-
-    panel.addEventListener('mousedown', stopRiseBubble, true);
-    panel.addEventListener('click', stopRiseBubble, true);
-    panel.addEventListener('touchstart', stopRiseBubble, true);
-    search.addEventListener('mousedown', stopRiseBubble, true);
-    search.addEventListener('click', stopRiseBubble, true);
-    search.addEventListener('touchstart', stopRiseBubble, true);
-
-    trigger.addEventListener('mousedown', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-      if (panel.classList.contains('rt-open')) {
+    function togglePanel(e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      if (panelOpen) {
         closePanel(trigger, panel);
       } else {
         openPanel(trigger, panel, search);
       }
+    }
+
+    trigger.addEventListener('mousedown', function (e) {
+      e.stopPropagation();
     });
+    trigger.addEventListener('click', togglePanel);
+
+    list.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    list.addEventListener('click', function (e) { e.stopPropagation(); });
+    search.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    search.addEventListener('click', function (e) { e.stopPropagation(); });
 
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && panelOpen) closePanel(trigger, panel);
     });
+
+    setTimeout(function () {
+      document.addEventListener('mouseup', function (e) {
+        var node = e.target;
+        var path, i;
+        if (!panelOpen) return;
+        if (bar.contains(node) || panel.contains(node)) return;
+        if (e.composedPath) {
+          path = e.composedPath();
+          for (i = 0; i < path.length; i++) {
+            if (path[i] === bar || path[i] === panel || path[i] === trigger) return;
+          }
+        }
+        closePanel(trigger, panel);
+      });
+    }, 0);
 
     window.addEventListener('scroll', function () {
       if (panelOpen) positionPortaledPanel(trigger, panel);
@@ -536,6 +549,7 @@
   function openPanel(trigger, panel, search) {
     var bar = barRef;
     var wrap = (bar && bar._wrap) || panelWrapRef;
+    if (panelOpen) return;
     if (focusTimer) { clearTimeout(focusTimer); focusTimer = null; }
     panelOpen = true;
     panel.classList.add('rt-open');
@@ -554,6 +568,7 @@
 
   function closePanel(trigger, panel) {
     var wrap = (barRef && barRef._wrap) || panelWrapRef;
+    if (!panelOpen) return;
     if (focusTimer) { clearTimeout(focusTimer); focusTimer = null; }
     panelOpen = false;
     panel.classList.remove('rt-open');
@@ -578,7 +593,7 @@
   }
 
   function selectLanguage(code, list) {
-    var bar = document.getElementById(BAR_ID);
+    var bar = barRef || document.getElementById(BAR_ID);
     if (!bar) return;
     setTriggerLabel(code);
     saveLang(code);
@@ -586,6 +601,7 @@
     list.querySelectorAll('.rt-option').forEach(function (o) {
       o.classList.toggle('rt-selected', o.getAttribute('data-code') === code);
     });
+    if (bar._trigger && bar._panel) closePanel(bar._trigger, bar._panel);
     translatePage(code, bar._spinner, null, bar._reset);
   }
 
