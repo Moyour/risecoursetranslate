@@ -2,7 +2,7 @@
  * risecoursetranslate.js — Rise & Storyline Course Translator
  * Drop-in: add <script src="risecoursetranslate.js" defer></script> to index.html
  * Uses Google Translate (free endpoint). No API key required.
- * v1.2 — fixed dropdown collapse bug, added searchable language picker
+ * v1.3 — fixed dropdown instantly closing on open
  */
 (function () {
   'use strict';
@@ -203,18 +203,25 @@
     /* stop clicks inside panel bubbling to document close listener */
     panel.addEventListener('mousedown', function (e) { e.stopPropagation(); });
 
+    var justOpened = false;
+
     trigger.addEventListener('click', function (e) {
       e.stopPropagation();
       var isOpen = panel.classList.contains('open');
       if (isOpen) {
         closePanel(trigger, panel);
       } else {
+        justOpened = true;
         openPanel(trigger, panel, search);
+        setTimeout(function () { justOpened = false; }, 50);
       }
     });
 
-    /* close on outside click */
-    document.addEventListener('click', function () { closePanel(trigger, panel); });
+    /* close on outside click — but not the same click that opened it */
+    document.addEventListener('click', function () {
+      if (justOpened) return;
+      closePanel(trigger, panel);
+    });
 
     panel.appendChild(search);
     panel.appendChild(list);
