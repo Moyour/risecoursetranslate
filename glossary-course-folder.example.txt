@@ -1,0 +1,7 @@
+# One-time setup (optional):
+# 1. Copy this file to: glossary-course-folder.txt
+# 2. Replace the line below with the full path to your scormcontent folder
+# 3. Double-click "Update Glossary" — the .js file copies there automatically
+#
+# Example (Mac):
+# /Users/yourname/Desktop/MyCourse/scormcontent
