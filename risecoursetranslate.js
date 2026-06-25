@@ -3,14 +3,14 @@
  * Drop-in: add <script src="risecoursetranslate.js" defer></script> to index.html
  * Optional glossary: data-glossary="glossary.csv" — words in the CSV stay untranslated
  * Uses Google Translate (free endpoint). No API key required.
- * v1.8.1 — simple one-column glossary CSV (all terms protected in every language)
+ * v1.8.2 — Source content / Target content Excel export format
  */
 (function () {
   'use strict';
 
   if (window.__riseTranslateLoaded) return;
   window.__riseTranslateLoaded = true;
-  window.__riseTranslateVersion = '1.8.1';
+  window.__riseTranslateVersion = '1.8.2';
 
   var LANGUAGES = [
     { code: 'af', label: 'Afrikaans' },
@@ -681,9 +681,36 @@
     return parts;
   }
 
+  function trimTerm(t) {
+    return String(t).replace(/\u00a0/g, ' ').trim();
+  }
+
+  function addKeepTerm(g, term) {
+    term = trimTerm(term);
+    if (!term || g.keep.indexOf(term) !== -1) return;
+    g.keep.push(term);
+  }
+
+  function finalizeGlossary(g) {
+    g.keep = g.keep.map(trimTerm).filter(Boolean);
+    g.keep = g.keep.filter(function (t, i) { return g.keep.indexOf(t) === i; });
+    return g;
+  }
+
+  function isSourceTargetHeader(cols) {
+    return cols[0] && /^source\s*content$/i.test(trimTerm(cols[0]));
+  }
+
+  function isGlossaryType(value) {
+    var type = trimTerm(value).toLowerCase();
+    return type === 'keep' || type === 'skip' || type === 'donttranslate' || type === "don't translate"
+      || type === 'override' || type === 'fix';
+  }
+
   function isGlossaryHeader(cols, line) {
     if (/^term\s*,/i.test(line)) return true;
-    if (cols.length === 1 && /^(term|word|words|glossary|terms?)$/i.test(cols[0])) return true;
+    if (isSourceTargetHeader(cols)) return true;
+    if (cols.length === 1 && /^(term|word|words|glossary|terms?)$/i.test(trimTerm(cols[0]))) return true;
     return false;
   }
 
@@ -691,21 +718,38 @@
     var g = emptyGlossary();
     var lines = text.split(/\r?\n/);
     var start = 0;
+    var sourceTargetFormat = false;
     var i, cols, term, type, lang, translation;
     lines = lines.filter(function (l) { return l.trim(); });
-    if (lines.length && isGlossaryHeader(parseCSVLine(lines[0]), lines[0])) start = 1;
+    if (lines.length) {
+      cols = parseCSVLine(lines[0]);
+      if (isGlossaryHeader(cols, lines[0])) {
+        sourceTargetFormat = isSourceTargetHeader(cols);
+        start = 1;
+      }
+    }
     for (i = start; i < lines.length; i++) {
       cols = parseCSVLine(lines[i]);
       term = cols[0];
       if (!term) continue;
-      /* Single-column list, or type blank → protect term in every language */
-      if (cols.length === 1 || !cols[1] || !cols[1].trim()) {
-        g.keep.push(term);
+      if (sourceTargetFormat) {
+        addKeepTerm(g, term);
+        if (cols[1]) addKeepTerm(g, cols[1]);
         continue;
       }
-      type = cols[1].toLowerCase().trim();
+      /* Single-column list, or type blank → protect term in every language */
+      if (cols.length === 1 || !cols[1] || !trimTerm(cols[1])) {
+        addKeepTerm(g, term);
+        continue;
+      }
+      if (!isGlossaryType(cols[1])) {
+        addKeepTerm(g, term);
+        addKeepTerm(g, cols[1]);
+        continue;
+      }
+      type = trimTerm(cols[1]).toLowerCase();
       if (type === 'keep' || type === 'skip' || type === 'donttranslate' || type === "don't translate") {
-        g.keep.push(term);
+        addKeepTerm(g, term);
       } else if (type === 'override' || type === 'fix') {
         lang = (cols[2] || '').toLowerCase().trim();
         translation = cols[3] || '';
@@ -714,10 +758,10 @@
           g.overrides[lang][term] = translation;
         }
       } else {
-        g.keep.push(term);
+        addKeepTerm(g, term);
       }
     }
-    return g;
+    return finalizeGlossary(g);
   }
 
   function loadGlossary(done) {
