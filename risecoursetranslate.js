@@ -1,22 +1,21 @@
 /*!
  * risecoursetranslate.js — Rise & Storyline Course Translator
- * Drop-in: add <script src="risecoursetranslate.js" defer></script> to index.html
- * Optional glossary: run scripts/build-combined-embed.mjs for one paste block with glossary + CDN
- * Uses Google Translate (free endpoint). No API key required.
- * v1.8.5 — default filename Translation Glossary (.js / .csv)
+ * Drop-in (one line in index.html + copy Translation Glossary.csv into course folder):
+ * <script src="https://cdn.jsdelivr.net/gh/Moyour/risecoursetranslate@main/risecoursetranslate.js" defer></script>
+ * v1.8.6 — auto-loads Translation Glossary.csv from the course folder
  */
 (function () {
   'use strict';
 
   if (window.__riseTranslateLoaded) return;
   window.__riseTranslateLoaded = true;
-  window.__riseTranslateVersion = '1.8.5';
+  window.__riseTranslateVersion = '1.8.6';
   var scriptElRef = document.currentScript;
   var DEFAULT_GLOSSARY_FILES = [
-    'Translation Glossary.js',
     'Translation Glossary.csv',
-    'glossary.js',
-    'glossary.csv'
+    'Translation Glossary.js',
+    'glossary.csv',
+    'glossary.js'
   ];
 
   var LANGUAGES = [
