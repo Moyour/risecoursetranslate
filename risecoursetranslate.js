@@ -3,14 +3,15 @@
  * Drop-in: add <script src="risecoursetranslate.js" defer></script> to index.html
  * Optional glossary: data-glossary="glossary.csv" — words in the CSV stay untranslated
  * Uses Google Translate (free endpoint). No API key required.
- * v1.8.3 — fix glossary: block-level text + segment translation (Rise-safe)
+ * v1.8.4 — glossary: inline embed + multi-path fetch (SCORM/Rise fix)
  */
 (function () {
   'use strict';
 
   if (window.__riseTranslateLoaded) return;
   window.__riseTranslateLoaded = true;
-  window.__riseTranslateVersion = '1.8.3';
+  window.__riseTranslateVersion = '1.8.4';
+  var scriptElRef = document.currentScript;
 
   var LANGUAGES = [
     { code: 'af', label: 'Afrikaans' },
@@ -616,8 +617,94 @@
 
   /* ── GLOSSARY ────────────────────────────────────────────────────── */
   function getScriptEl() {
-    return document.currentScript
-      || document.querySelector('script[data-glossary],script[data-glossary-url],script[src*="risecoursetranslate"]');
+    return scriptElRef
+      || document.querySelector('script[data-glossary],script[data-glossary-url],script[data-glossary-element],script[src*="risecoursetranslate"]');
+  }
+
+  function getPageBaseUrl() {
+    var path = window.location.pathname || '/';
+    if (path.slice(-1) === '/') return window.location.origin + path;
+    var slash = path.lastIndexOf('/');
+    if (slash === -1) return window.location.origin + '/';
+    return window.location.origin + path.slice(0, slash + 1);
+  }
+
+  function getGlossaryCandidateUrls(path) {
+    var urls = [];
+    var base = getPageBaseUrl();
+    var script = getScriptEl();
+    var clean = path.replace(/^\.\//, '');
+    function add(u) {
+      if (u && urls.indexOf(u) === -1) urls.push(u);
+    }
+    try { add(new URL(clean, base).href); } catch (e) { add(clean); }
+    try { add(new URL(clean, window.location.href).href); } catch (e) {}
+    try { add(new URL('./' + clean, base).href); } catch (e) {}
+    if (script && script.src) {
+      try { add(new URL(clean, script.src).href); } catch (e) {}
+    }
+    return urls;
+  }
+
+  function getInlineGlossaryText() {
+    if (window.__riseGlossaryCsv) return window.__riseGlossaryCsv;
+    var script = getScriptEl();
+    var elId, el, prev;
+    if (!script) return null;
+    elId = script.getAttribute('data-glossary-element');
+    if (elId) {
+      el = document.getElementById(elId);
+      if (el) return el.textContent;
+    }
+    prev = script.previousElementSibling;
+    if (prev && prev.getAttribute('data-rise-glossary') !== null) {
+      return prev.textContent;
+    }
+    return null;
+  }
+
+  function applyGlossaryFromText(text, source, done) {
+    var trimmed = text.trim();
+    try {
+      if (/\.json$/i.test(source) || trimmed.charAt(0) === '{') {
+        glossary = normalizeGlossary(JSON.parse(trimmed));
+      } else {
+        glossary = parseGlossaryCSV(text);
+      }
+      console.info('[risecoursetranslate] Glossary loaded:', glossary.keep.length, 'protected term(s) from', source);
+      window.__riseGlossaryCount = glossary.keep.length;
+      window.__riseGlossarySource = source;
+      done();
+    } catch (e) {
+      glossary = emptyGlossary();
+      window.__riseGlossaryCount = 0;
+      console.warn('[risecoursetranslate] Glossary parse error (' + source + '):', e.message);
+      done();
+    }
+  }
+
+  function fetchUrlText(url) {
+    return fetch(url, { credentials: 'same-origin' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    });
+  }
+
+  function loadGlossaryFromUrls(urls, idx, done) {
+    if (idx >= urls.length) {
+      glossary = emptyGlossary();
+      window.__riseGlossaryCount = 0;
+      window.__riseGlossarySource = null;
+      console.warn('[risecoursetranslate] Glossary not loaded. Tried:', urls.join(' | '));
+      done();
+      return;
+    }
+    fetchUrlText(urls[idx])
+      .then(function (text) { applyGlossaryFromText(text, urls[idx], done); })
+      .catch(function (e) {
+        console.warn('[risecoursetranslate] Glossary fetch failed (' + urls[idx] + '):', e.message);
+        loadGlossaryFromUrls(urls, idx + 1, done);
+      });
   }
 
   function getGlossaryUrl() {
@@ -629,11 +716,7 @@
     }
     path = script.getAttribute('data-glossary');
     if (!path) return null;
-    try {
-      return new URL(path, window.location.href).href;
-    } catch (e) {
-      return path;
-    }
+    return getGlossaryCandidateUrls(path)[0] || null;
   }
 
   function emptyGlossary() {
@@ -765,33 +848,23 @@
   }
 
   function loadGlossary(done) {
-    var url = getGlossaryUrl();
-    if (!url) {
+    var inline = getInlineGlossaryText();
+    var script = getScriptEl();
+    var path, urls;
+    if (inline) {
+      return applyGlossaryFromText(inline, 'inline', done);
+    }
+    if (script && script.getAttribute('data-glossary-url')) {
+      return loadGlossaryFromUrls([script.getAttribute('data-glossary-url')], 0, done);
+    }
+    path = script && script.getAttribute('data-glossary');
+    if (!path) {
       glossary = emptyGlossary();
+      window.__riseGlossaryCount = 0;
       return done();
     }
-    fetch(url)
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.text();
-      })
-      .then(function (text) {
-        var trimmed = text.trim();
-        if (/\.json$/i.test(url) || trimmed.charAt(0) === '{') {
-          glossary = normalizeGlossary(JSON.parse(trimmed));
-        } else {
-          glossary = parseGlossaryCSV(text);
-        }
-        console.info('[risecoursetranslate] Glossary loaded:', glossary.keep.length, 'protected term(s)');
-        window.__riseGlossaryCount = glossary.keep.length;
-        window.__riseGlossaryUrl = url;
-        done();
-      })
-      .catch(function (e) {
-        glossary = emptyGlossary();
-        console.warn('[risecoursetranslate] Glossary not loaded (' + url + '):', e.message);
-        done();
-      });
+    urls = getGlossaryCandidateUrls(path);
+    loadGlossaryFromUrls(urls, 0, done);
   }
 
   function getOverride(text, lang) {
