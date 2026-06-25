@@ -3,14 +3,14 @@
  * Drop-in: add <script src="risecoursetranslate.js" defer></script> to index.html
  * Optional glossary: data-glossary="glossary.csv" — words in the CSV stay untranslated
  * Uses Google Translate (free endpoint). No API key required.
- * v1.8.2 — Source content / Target content Excel export format
+ * v1.8.3 — fix glossary: block-level text + segment translation (Rise-safe)
  */
 (function () {
   'use strict';
 
   if (window.__riseTranslateLoaded) return;
   window.__riseTranslateLoaded = true;
-  window.__riseTranslateVersion = '1.8.2';
+  window.__riseTranslateVersion = '1.8.3';
 
   var LANGUAGES = [
     { code: 'af', label: 'Afrikaans' },
@@ -79,9 +79,8 @@
   var barRef            = null;
   var placeBarPending   = false;
   var panelWrapRef      = null;
+  var BLOCK_SEL         = 'h1,h2,h3,h4,h5,h6,p,li,td,th,blockquote,figcaption,dt,dd,button,a,label,span,[class*="blocks-"]';
   var glossary          = { keep: [], overrides: {} };
-  var PH_OPEN           = '\uE000';
-  var PH_CLOSE          = '\uE001';
 
   /* ── STYLES ─────────────────────────────────────────────────────── */
   var css = [
@@ -617,7 +616,8 @@
 
   /* ── GLOSSARY ────────────────────────────────────────────────────── */
   function getScriptEl() {
-    return document.currentScript || document.querySelector('script[src*="risecoursetranslate"]');
+    return document.currentScript
+      || document.querySelector('script[data-glossary],script[data-glossary-url],script[src*="risecoursetranslate"]');
   }
 
   function getGlossaryUrl() {
@@ -783,6 +783,8 @@
           glossary = parseGlossaryCSV(text);
         }
         console.info('[risecoursetranslate] Glossary loaded:', glossary.keep.length, 'protected term(s)');
+        window.__riseGlossaryCount = glossary.keep.length;
+        window.__riseGlossaryUrl = url;
         done();
       })
       .catch(function (e) {
@@ -797,57 +799,130 @@
     return map && map[text] ? map[text] : null;
   }
 
-  function protectText(text, keepList) {
-    var map = {};
-    var sorted = keepList.slice().sort(function (a, b) { return b.length - a.length; });
-    var i, term, ph;
-    for (i = 0; i < sorted.length; i++) {
-      term = sorted[i];
-      if (!term || text.indexOf(term) === -1) continue;
-      ph = PH_OPEN + 'g' + i + PH_CLOSE;
-      map[ph] = term;
-      text = text.split(term).join(ph);
-    }
-    return { text: text, map: map };
+  function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  function restoreText(text, map) {
-    var ph;
-    for (ph in map) {
-      if (Object.prototype.hasOwnProperty.call(map, ph)) {
-        text = text.split(ph).join(map[ph]);
+  function findGlossaryMatches(text, keepList) {
+    var all = [];
+    var i, term, re, m;
+    if (!text || !keepList.length) return [];
+    for (i = 0; i < keepList.length; i++) {
+      term = keepList[i];
+      if (!term) continue;
+      re = new RegExp(escapeRegex(term), 'gi');
+      while ((m = re.exec(text)) !== null) {
+        all.push({ start: m.index, end: m.index + m[0].length });
+        if (m[0].length === 0) re.lastIndex++;
       }
     }
-    return text;
+    all.sort(function (a, b) {
+      var lenDiff = (b.end - b.start) - (a.end - a.start);
+      if (lenDiff !== 0) return lenDiff;
+      return a.start - b.start;
+    });
+    var picked = [];
+    all.forEach(function (match) {
+      var overlaps = picked.some(function (p) {
+        return !(match.end <= p.start || match.start >= p.end);
+      });
+      if (!overlaps) picked.push(match);
+    });
+    picked.sort(function (a, b) { return a.start - b.start; });
+    return picked;
+  }
+
+  function buildSegments(text, matches) {
+    var segments = [];
+    var pos = 0;
+    var i, m;
+    for (i = 0; i < matches.length; i++) {
+      m = matches[i];
+      if (m.start > pos) segments.push({ type: 'text', value: text.slice(pos, m.start) });
+      segments.push({ type: 'term', value: text.slice(m.start, m.end) });
+      pos = m.end;
+    }
+    if (pos < text.length) segments.push({ type: 'text', value: text.slice(pos) });
+    if (!segments.length) segments.push({ type: 'text', value: text });
+    return segments;
+  }
+
+  function assembleFromSegments(segments, translatedParts) {
+    var ti = 0;
+    return segments.map(function (seg) {
+      if (seg.type === 'term') return seg.value;
+      if (trimTerm(seg.value).length < 2) return seg.value;
+      return translatedParts[ti++] || seg.value;
+    }).join('');
+  }
+
+  function prepareTranslationJob(orig, lang) {
+    var override = getOverride(orig, lang);
+    if (override) return { orig: orig, override: override };
+    return {
+      orig: orig,
+      segments: buildSegments(orig, findGlossaryMatches(orig, glossary.keep))
+    };
+  }
+
+  function getTranslateRoots() {
+    var roots = [];
+    if (document.body) roots.push(document.body);
+    document.querySelectorAll('iframe').forEach(function (frame) {
+      try {
+        if (frame.contentDocument && frame.contentDocument.body) {
+          roots.push(frame.contentDocument.body);
+        }
+      } catch (e) {}
+    });
+    return roots;
+  }
+
+  function getTranslateBlocks() {
+    var blocks = [];
+    var seen = typeof WeakSet !== 'undefined' ? new WeakSet() : null;
+    getTranslateRoots().forEach(function (root) {
+      root.querySelectorAll(BLOCK_SEL).forEach(function (el) {
+        if (seen && seen.has(el)) return;
+        if (el.closest && (el.closest('#' + BAR_ID) || el.closest('.rt-panel'))) return;
+        if (el.closest && el.closest('script,style,noscript')) return;
+        if (el.querySelector(BLOCK_SEL)) return;
+        var text = el.textContent;
+        if (!text || trimTerm(text).length < 2) return;
+        if (seen) seen.add(el);
+        blocks.push(el);
+      });
+    });
+    return blocks;
+  }
+
+  function setBlockTranslatedText(el, original, translated) {
+    var lead = (original.match(/^\s*/) || [''])[0];
+    var trail = (original.match(/\s*$/) || [''])[0];
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    var n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    if (nodes.length === 1) {
+      nodes[0].nodeValue = lead + translated + trail;
+      return;
+    }
+    if (nodes.length > 1) {
+      nodes[0].nodeValue = lead + translated;
+      for (var i = 1; i < nodes.length; i++) nodes[i].nodeValue = '';
+      return;
+    }
+    el.textContent = translated;
   }
 
   /* ── TEXT NODES ─────────────────────────────────────────────────── */
-  function getTextNodes() {
-    var skip  = ['SCRIPT','STYLE','NOSCRIPT','IFRAME','OPTION','SELECT'];
-    var nodes = [];
-    var walk  = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-      acceptNode: function (node) {
-        var p = node.parentElement;
-        if (!p) return NodeFilter.FILTER_REJECT;
-        if (p.closest && (p.closest('#' + BAR_ID) || p.closest('.rt-panel'))) return NodeFilter.FILTER_REJECT;
-        if (skip.indexOf(p.nodeName) !== -1) return NodeFilter.FILTER_REJECT;
-        var txt = node.nodeValue.trim();
-        if (!txt || txt.length < 2) return NodeFilter.FILTER_SKIP;
-        return NodeFilter.FILTER_ACCEPT;
-      }
-    });
-    var n;
-    while ((n = walk.nextNode())) nodes.push(n);
-    return nodes;
-  }
-
   /* ── TRANSLATION ─────────────────────────────────────────────────── */
   function translatePage(lang, spinner, status, resetBtn) {
-    var nodes = getTextNodes();
+    var blocks = getTranslateBlocks();
     var toTranslate = [];
-    nodes.forEach(function (node) {
-      if (!originalMap.has(node)) originalMap.set(node, node.nodeValue);
-      var orig = originalMap.get(node).trim();
+    blocks.forEach(function (el) {
+      if (!originalMap.has(el)) originalMap.set(el, el.textContent);
+      var orig = trimTerm(originalMap.get(el));
       if (orig.length < 2) return;
       cache[lang] = cache[lang] || {};
       if (cache[lang][orig]) return;
@@ -855,7 +930,7 @@
         cache[lang][orig] = getOverride(orig, lang);
         return;
       }
-      if (!cache[lang][orig]) toTranslate.push(orig);
+      toTranslate.push(orig);
     });
     toTranslate = unique(toTranslate);
 
@@ -863,7 +938,7 @@
     document.body.style.direction = (langObj && langObj.rtl) ? 'rtl' : '';
 
     if (toTranslate.length === 0) {
-      applyTranslations(nodes, lang);
+      applyTranslations(blocks, lang);
       if (resetBtn) resetBtn.style.display = 'inline-block';
       return;
     }
@@ -880,61 +955,80 @@
         resumeObserver();
         return;
       }
-      applyTranslations(nodes, lang);
+      applyTranslations(blocks, lang);
       if (status)   status.textContent = 'Translated: ' + (langObj ? langObj.label : lang);
       if (resetBtn) resetBtn.style.display = 'inline-block';
       resumeObserver();
     });
   }
 
-  function applyTranslations(nodes, lang) {
-    nodes.forEach(function (node) {
-      var orig = originalMap.get(node);
+  function applyTranslations(blocks, lang) {
+    blocks.forEach(function (el) {
+      var orig = originalMap.get(el);
       if (!orig) return;
-      var trimmed = orig.trim();
-      if (cache[lang] && cache[lang][trimmed]) {
-        node.nodeValue = orig.match(/^\s*/)[0] + cache[lang][trimmed] + orig.match(/\s*$/)[0];
+      var key = trimTerm(orig);
+      if (cache[lang] && cache[lang][key]) {
+        setBlockTranslatedText(el, orig, cache[lang][key]);
       }
     });
   }
 
   /* ── GOOGLE TRANSLATE ────────────────────────────────────────────── */
   function batchTranslate(texts, lang, done) {
-    var chunks = chunkArray(texts, 50);
+    var jobs = texts.map(function (orig) { return prepareTranslationJob(orig, lang); });
+    var toSend = [];
+    var i, j, job, seg;
+    jobs.forEach(function (item) {
+      if (item.override) return;
+      item.segments.forEach(function (segment) {
+        if (segment.type === 'text' && trimTerm(segment.value).length >= 2) {
+          toSend.push(segment.value);
+        }
+      });
+    });
+
+    if (!toSend.length) {
+      jobs.forEach(function (item) {
+        cache[lang][item.orig] = item.override || item.orig;
+      });
+      return done(null);
+    }
+
+    var chunks = chunkArray(toSend, 50);
     var pending = chunks.length;
     var errored = null;
-    var i, chunk, packed, toSend, j, item;
-    if (!pending) return done(null);
+    var resultsByChunk = new Array(chunks.length);
+
     for (i = 0; i < chunks.length; i++) {
-      chunk = chunks[i];
-      packed = chunk.map(function (orig) {
-        var override = getOverride(orig, lang);
-        if (override) return { orig: orig, override: override };
-        var protectedText = protectText(orig, glossary.keep);
-        return { orig: orig, text: protectedText.text, map: protectedText.map };
-      });
-      toSend = [];
-      for (j = 0; j < packed.length; j++) {
-        if (!packed[j].override) toSend.push(packed[j].text);
-      }
-      (function (packedChunk, sendTexts) {
-        function finishChunk(err, results) {
+      (function (chunkIdx, chunk) {
+        googleTranslate(chunk, lang, function (err, results) {
           if (errored) return;
           if (err) { errored = err; return done(err); }
-          var ri = 0;
-          packedChunk.forEach(function (item) {
-            if (item.override) {
-              cache[lang][item.orig] = item.override;
-            } else {
-              cache[lang][item.orig] = restoreText(results[ri] || item.orig, item.map);
-              ri++;
+          resultsByChunk[chunkIdx] = results || [];
+          if (--pending === 0) {
+            var pool = [];
+            var cursor = 0;
+            var parts;
+            for (j = 0; j < resultsByChunk.length; j++) {
+              pool = pool.concat(resultsByChunk[j]);
             }
-          });
-          if (--pending === 0) done(null);
-        }
-        if (!sendTexts.length) return finishChunk(null, []);
-        googleTranslate(sendTexts, lang, finishChunk);
-      })(packed, toSend);
+            jobs.forEach(function (item) {
+              if (item.override) {
+                cache[lang][item.orig] = item.override;
+                return;
+              }
+              parts = [];
+              item.segments.forEach(function (segment) {
+                if (segment.type === 'text' && trimTerm(segment.value).length >= 2) {
+                  parts.push(pool[cursor++] || segment.value);
+                }
+              });
+              cache[lang][item.orig] = assembleFromSegments(item.segments, parts);
+            });
+            done(null);
+          }
+        });
+      })(i, chunks[i]);
     }
   }
 
@@ -955,7 +1049,7 @@
 
   /* ── RESTORE ─────────────────────────────────────────────────────── */
   function restorePage() {
-    originalMap.forEach(function (orig, node) { node.nodeValue = orig; });
+    originalMap.forEach(function (orig, el) { el.textContent = orig; });
     document.body.style.direction = '';
   }
 
