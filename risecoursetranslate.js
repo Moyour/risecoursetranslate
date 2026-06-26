@@ -2,14 +2,14 @@
  * risecoursetranslate.js — Rise & Storyline Course Translator
  * Drop-in (one line in index.html + copy Translation Glossary.csv into course folder):
  * <script src="https://cdn.jsdelivr.net/gh/Moyour/risecoursetranslate@main/risecoursetranslate.js" data-glossary="Translation Glossary.csv" defer></script>
- * v1.8.7 — xAPI fix: auto-load Translation Glossary.js when CSV fetch fails
+ * v1.8.8 — fix glossary .js load (CSV was mis-parsed when source URL ended in .js)
  */
 (function () {
   'use strict';
 
   if (window.__riseTranslateLoaded) return;
   window.__riseTranslateLoaded = true;
-  window.__riseTranslateVersion = '1.8.7';
+  window.__riseTranslateVersion = '1.8.8';
   var scriptElRef = document.currentScript;
   var GLOSSARY_FETCH_FILES = ['Translation Glossary.csv', 'glossary.csv'];
   var GLOSSARY_SCRIPT_FILES = ['Translation Glossary.js', 'glossary.js'];
@@ -674,7 +674,8 @@
     var trimmed = text.trim();
     var csvText = text;
     try {
-      if (/\.js$/i.test(source) || /window\.__riseGlossaryCsv/.test(text)) {
+      /* Only parse as .js when content is a JS file, not when __riseGlossaryCsv is already plain CSV */
+      if (/window\.__riseGlossaryCsv\s*=/.test(text)) {
         csvText = extractCsvFromGlossaryJs(text);
         trimmed = csvText.trim();
       }
@@ -682,6 +683,9 @@
         glossary = normalizeGlossary(JSON.parse(trimmed));
       } else {
         glossary = parseGlossaryCSV(csvText);
+      }
+      if (!glossary.keep.length) {
+        throw new Error('No terms found in glossary');
       }
       console.info('[risecoursetranslate] Glossary loaded:', glossary.keep.length, 'protected term(s) from', source);
       window.__riseGlossaryCount = glossary.keep.length;
