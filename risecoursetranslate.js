@@ -1,7 +1,7 @@
 /*!
  * risecoursetranslate.js — Rise & Storyline Course Translator
  * Drop-in (one line in index.html + copy Translation Glossary.csv into course folder):
- * <script src="https://cdn.jsdelivr.net/gh/Moyour/risecoursetranslate@main/risecoursetranslate.js" defer></script>
+ * <script src="https://cdn.jsdelivr.net/gh/Moyour/risecoursetranslate@main/risecoursetranslate.js" data-glossary="Translation Glossary.csv" defer></script>
  * v1.8.7 — xAPI fix: auto-load Translation Glossary.js when CSV fetch fails
  */
 (function () {

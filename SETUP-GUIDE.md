@@ -14,15 +14,27 @@ Summary of the risecoursetranslate project and how to use it in Articulate Rise 
 
 ---
 
-## Current version
+## The one line (never change this)
 
-**v1.8.7** — commit `a71905e`
+Paste once in **`scormcontent/index.html`**. **Your team does not update this.**
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/Moyour/risecoursetranslate@a71905e/risecoursetranslate.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/Moyour/risecoursetranslate@main/risecoursetranslate.js" data-glossary="Translation Glossary.csv" defer></script>
 ```
 
-Update `@a71905e` when a newer version is pushed.
+`@main` always uses the latest version on GitHub — no new link when we push fixes.
+
+**Optional frozen version** (only change if you choose to upgrade later):
+
+```html
+<script src="https://cdn.jsdelivr.net/gh/Moyour/risecoursetranslate@v1.8.7/risecoursetranslate.js" data-glossary="Translation Glossary.csv" defer></script>
+```
+
+---
+
+## Current version
+
+**v1.8.7**
 
 ---
 
@@ -63,7 +75,7 @@ No terminal. No CSV export. No editing `.js` files by hand.
 Paste inside `<head>` or top of `<body>` in **`scormcontent/index.html`**:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/Moyour/risecoursetranslate@a71905e/risecoursetranslate.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/Moyour/risecoursetranslate@main/risecoursetranslate.js" data-glossary="Translation Glossary.csv" defer></script>
 ```
 
 ### Step 2 — One file in the course folder
